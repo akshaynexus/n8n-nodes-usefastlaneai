@@ -1,19 +1,22 @@
 {
-	"name": "n8n-nodes-<...>",
+	"name": "n8n-nodes-usefastlaneai",
 	"version": "0.1.0",
-	"description": "",
+	"description": "N8n nodes for Fastlane AI content generation API",
 	"license": "MIT",
-	"homepage": "",
+	"homepage": "https://github.com/akshaynexus/n8n-nodes-usefastlaneai",
 	"keywords": [
-		"n8n-community-node-package"
+		"n8n-community-node-package",
+		"fastlane",
+		"ai",
+		"content-generation"
 	],
 	"author": {
-		"name": "",
+		"name": "Akshay",
 		"email": ""
 	},
 	"repository": {
 		"type": "git",
-		"url": "https://github.com/<...>/n8n-nodes-<...>.git"
+		"url": "https://github.com/akshaynexus/n8n-nodes-usefastlaneai.git"
 	},
 	"scripts": {
 		"build": "n8n-node build",
@@ -31,12 +34,10 @@
 		"n8nNodesApiVersion": 1,
 		"strict": true,
 		"credentials": [
-			"dist/credentials/GithubIssuesApi.credentials.js",
-			"dist/credentials/GithubIssuesOAuth2Api.credentials.js"
+			"dist/credentials/FastlaneApi.credentials.js"
 		],
 		"nodes": [
-			"dist/nodes/GithubIssues/GithubIssues.node.js",
-			"dist/nodes/Example/Example.node.js"
+			"dist/nodes/FastlaneAI/FastlaneAI.node.js"
 		]
 	},
 	"devDependencies": {
@@ -48,5 +49,8 @@
 	},
 	"peerDependencies": {
 		"n8n-workflow": "*"
+	},
+	"dependencies": {
+		"usefastlane-api": "^1.0.0"
 	}
 }

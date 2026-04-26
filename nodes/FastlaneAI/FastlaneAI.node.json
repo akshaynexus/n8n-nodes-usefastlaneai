@@ -1,0 +1,19 @@
+{
+	"node": "n8n-nodes-usefastlaneai.fastlaneAI",
+	"nodeVersion": "1.0",
+	"codexVersion": "1.0",
+	"categories": ["Marketing", "AI"],
+	"resources": {
+		"credentialDocumentation": [
+			{
+				"url": "https://github.com/akshaynexus/usefastlane-api"
+			}
+		],
+		"primaryDocumentation": [
+			{
+				"url": "https://github.com/akshaynexus/n8n-nodes-usefastlaneai"
+			}
+		]
+	},
+	"properties": []
+}
