@@ -117,6 +117,36 @@ bun run build
 bun run dev
 ```
 
+## AI Agent Tool Usage
+
+This node supports n8n AI Agent tool usage. When connected to an AI Agent, the node operations appear as available tools the agent can call.
+
+### Requirements
+
+For **self-hosted n8n**, set this environment variable:
+
+```bash
+N8N_COMMUNITY_PACKAGES_ALLOW_TOOL_USAGE=true
+```
+
+For Docker Compose:
+
+```yaml
+environment:
+  - N8N_COMMUNITY_PACKAGES_ALLOW_TOOL_USAGE=true
+```
+
+Then restart n8n and connect this node to the AI Agent Tool port.
+
+### Usage in AI Agents
+
+Connect the Fastlane AI node to an AI Agent's tool port. The agent can then call operations like:
+- "Pop a blitz to generate new content"
+- "Get my recent posts"
+- "Schedule content for tomorrow"
+
+The node returns clean JSON output that AI agents can easily read.
+
 ## License
 
 MIT
