@@ -1,5 +1,6 @@
 import {
 	NodeConnectionTypes,
+	NodeOperationError,
 	type IExecuteFunctions,
 	type IDataObject,
 	type INodeExecutionData,
@@ -11,7 +12,7 @@ import { FastlaneClient } from 'usefastlane-api';
 export class FastlaneAI implements INodeType {
 	description: INodeTypeDescription = {
 		displayName: 'Fastlane AI',
-		name: 'fastlaneAI',
+		name: 'fastlaneAi',
 		icon: { light: 'file:../../icons/fastlane.svg', dark: 'file:../../icons/fastlane.dark.svg' },
 		group: ['input'],
 		version: 1,
@@ -44,10 +45,40 @@ export class FastlaneAI implements INodeType {
 				noDataExpression: true,
 				options: [
 					{
-						name: 'Pop Blitz',
-						value: 'popBlitz',
-						description: 'Generate new content from the discovery queue',
-						action: 'Pop a blitz from the discovery queue',
+						name: 'Cancel Posts',
+						value: 'cancelPosts',
+						description: 'Cancel scheduled posts',
+						action: 'Cancel posts',
+					},
+					{
+						name: 'Create Angle',
+						value: 'createAngle',
+						description: 'Create a new content angle',
+						action: 'Create angle',
+					},
+					{
+						name: 'Delete Angle',
+						value: 'deleteAngle',
+						description: 'Delete a content angle',
+						action: 'Delete angle',
+					},
+					{
+						name: 'Delete Content',
+						value: 'deleteContent',
+						description: 'Delete a content item',
+						action: 'Delete content',
+					},
+					{
+						name: 'Get Angles',
+						value: 'getAngles',
+						description: 'Get all content angles',
+						action: 'Get angles',
+					},
+					{
+						name: 'Get Connections',
+						value: 'getConnections',
+						description: 'Get connected social accounts',
+						action: 'Get connections',
 					},
 					{
 						name: 'Get Content',
@@ -62,64 +93,10 @@ export class FastlaneAI implements INodeType {
 						action: 'Get content by ID',
 					},
 					{
-						name: 'Delete Content',
-						value: 'deleteContent',
-						description: 'Delete a content item',
-						action: 'Delete content',
-					},
-					{
-						name: 'Get Preferences',
-						value: 'getPreferences',
-						description: 'Get discovery queue preferences',
-						action: 'Get preferences',
-					},
-					{
-						name: 'Update Preferences',
-						value: 'updatePreferences',
-						description: 'Update discovery queue preferences',
-						action: 'Update preferences',
-					},
-					{
-						name: 'Get Angles',
-						value: 'getAngles',
-						description: 'Get all content angles',
-						action: 'Get angles',
-					},
-					{
-						name: 'Create Angle',
-						value: 'createAngle',
-						description: 'Create a new content angle',
-						action: 'Create angle',
-					},
-					{
-						name: 'Update Angle',
-						value: 'updateAngle',
-						description: 'Update an existing content angle',
-						action: 'Update angle',
-					},
-					{
-						name: 'Delete Angle',
-						value: 'deleteAngle',
-						description: 'Delete a content angle',
-						action: 'Delete angle',
-					},
-					{
-						name: 'Get Connections',
-						value: 'getConnections',
-						description: 'Get connected social accounts',
-						action: 'Get connections',
-					},
-					{
-						name: 'Schedule Content',
-						value: 'scheduleContent',
-						description: 'Schedule content for posting',
-						action: 'Schedule content',
-					},
-					{
-						name: 'Get Posts',
-						value: 'getPosts',
-						description: 'Get scheduled and posted posts',
-						action: 'Get posts',
+						name: 'Get Post Analytics',
+						value: 'getPostAnalytics',
+						description: 'Get engagement metrics for posts',
+						action: 'Get post analytics',
 					},
 					{
 						name: 'Get Post by ID',
@@ -128,16 +105,40 @@ export class FastlaneAI implements INodeType {
 						action: 'Get post by ID',
 					},
 					{
-						name: 'Cancel Posts',
-						value: 'cancelPosts',
-						description: 'Cancel scheduled posts',
-						action: 'Cancel posts',
+						name: 'Get Posts',
+						value: 'getPosts',
+						description: 'Get scheduled and posted posts',
+						action: 'Get posts',
 					},
 					{
-						name: 'Get Post Analytics',
-						value: 'getPostAnalytics',
-						description: 'Get engagement metrics for posts',
-						action: 'Get post analytics',
+						name: 'Get Preferences',
+						value: 'getPreferences',
+						description: 'Get discovery queue preferences',
+						action: 'Get preferences',
+					},
+					{
+						name: 'Pop Blitz',
+						value: 'popBlitz',
+						description: 'Generate new content from the discovery queue',
+						action: 'Pop a blitz from the discovery queue',
+					},
+					{
+						name: 'Schedule Content',
+						value: 'scheduleContent',
+						description: 'Schedule content for posting',
+						action: 'Schedule content',
+					},
+					{
+						name: 'Update Angle',
+						value: 'updateAngle',
+						description: 'Update an existing content angle',
+						action: 'Update angle',
+					},
+					{
+						name: 'Update Preferences',
+						value: 'updatePreferences',
+						description: 'Update discovery queue preferences',
+						action: 'Update preferences',
 					},
 				],
 				default: 'popBlitz',
@@ -163,7 +164,8 @@ export class FastlaneAI implements INodeType {
 					minValue: 1,
 					maxValue: 100,
 				},
-				default: 20,
+				default: 50,
+				description: 'Max number of results to return',
 				displayOptions: {
 					show: {
 						operation: ['getContent', 'getPosts'],
@@ -179,8 +181,8 @@ export class FastlaneAI implements INodeType {
 					{ name: 'BUILDING', value: 'BUILDING' },
 					{ name: 'CREATED', value: 'CREATED' },
 					{ name: 'FAILED', value: 'FAILED' },
-					{ name: 'SCHEDULED', value: 'SCHEDULED' },
 					{ name: 'POSTED', value: 'POSTED' },
+					{ name: 'SCHEDULED', value: 'SCHEDULED' },
 				],
 				displayOptions: {
 					show: {
@@ -192,12 +194,12 @@ export class FastlaneAI implements INodeType {
 				displayName: 'Content Type',
 				name: 'contentType',
 				type: 'options',
-				default: '',
+				default: 'slideshow',
 				options: [
-					{ name: 'Slideshow', value: 'slideshow' },
-					{ name: 'Wall of Text', value: 'wall-of-text' },
 					{ name: 'Green Screen', value: 'green-screen' },
+					{ name: 'Slideshow', value: 'slideshow' },
 					{ name: 'Video Hook', value: 'video-hook' },
+					{ name: 'Wall of Text', value: 'wall-of-text' },
 				],
 				displayOptions: {
 					show: {
@@ -376,10 +378,10 @@ export class FastlaneAI implements INodeType {
 				name: 'platform',
 				type: 'options',
 				options: [
-					{ name: 'TikTok', value: 'tiktok' },
 					{ name: 'Instagram', value: 'instagram' },
-					{ name: 'YouTube', value: 'youtube' },
 					{ name: 'Reddit', value: 'reddit' },
+					{ name: 'TikTok', value: 'tiktok' },
+					{ name: 'YouTube', value: 'youtube' },
 				],
 				default: 'tiktok',
 				displayOptions: {
@@ -474,138 +476,172 @@ export class FastlaneAI implements INodeType {
 		],
 	};
 
-	async execute(this: IExecuteFunctions) {
+	async execute(this: IExecuteFunctions): Promise<INodeExecutionData[][]> {
+		const items = this.getInputData();
 		const credentials = await this.getCredentials('fastlaneApi');
-		const operation = this.getNodeParameter('operation', 0) as string;
-
 		const client = new FastlaneClient(credentials.apiKey as string);
 
-		let result: unknown;
+		const output: INodeExecutionData[] = [];
 
-		switch (operation) {
-			case 'popBlitz':
-				result = await client.popBlitz();
-				break;
+		for (let itemIndex = 0; itemIndex < items.length; itemIndex++) {
+			try {
+				const operation = this.getNodeParameter('operation', itemIndex) as string;
+				let result: unknown;
 
-			case 'getContent':
-				const contentLimit = this.getNodeParameter('limit', 0) as number;
-				const contentStatus = this.getNodeParameter('status', 0) as string[];
-				const contentType = this.getNodeParameter('contentType', 0) as string;
-				const joinedStatus = contentStatus.join(',');
-				result = await client.getContent({
-					limit: contentLimit,
-					status: joinedStatus ? (joinedStatus as 'BUILDING' | 'CREATED' | 'FAILED') : undefined,
-					type: contentType as 'slideshow' | 'wall-of-text' | 'green-screen' | 'video-hook' | undefined,
-				});
-				break;
+				switch (operation) {
+					case 'popBlitz': {
+						result = await client.popBlitz();
+						break;
+					}
 
-			case 'getContentById':
-				const contentId = this.getNodeParameter('contentId', 0) as string;
-				result = await client.getContentById(contentId);
-				break;
+					case 'getContent': {
+						const contentLimit = this.getNodeParameter('limit', itemIndex) as number;
+						const contentStatus = this.getNodeParameter('status', itemIndex) as string[];
+						const contentType = this.getNodeParameter('contentType', itemIndex) as string;
+						const joinedStatus = contentStatus.join(',');
+						result = await client.getContent({
+							limit: contentLimit,
+							status: joinedStatus ? (joinedStatus as 'BUILDING' | 'CREATED' | 'FAILED') : undefined,
+							type: contentType as 'slideshow' | 'wall-of-text' | 'green-screen' | 'video-hook' | undefined,
+						});
+						break;
+					}
 
-			case 'deleteContent':
-				const deleteContentId = this.getNodeParameter('contentId', 0) as string;
-				result = await client.deleteContent(deleteContentId);
-				break;
+					case 'getContentById': {
+						const contentId = this.getNodeParameter('contentId', itemIndex) as string;
+						result = await client.getContentById(contentId);
+						break;
+					}
 
-			case 'getPreferences':
-				result = await client.getPreferences();
-				break;
+					case 'deleteContent': {
+						const contentId = this.getNodeParameter('contentId', itemIndex) as string;
+						result = await client.deleteContent(contentId);
+						break;
+					}
 
-			case 'updatePreferences':
-				const prefs = {
-					slideshowWeight: this.getNodeParameter('slideshowWeight', 0) as number,
-					wallOfTextWeight: this.getNodeParameter('wallOfTextWeight', 0) as number,
-					greenScreenWeight: this.getNodeParameter('greenScreenWeight', 0) as number,
-					videoHookWeight: this.getNodeParameter('videoHookWeight', 0) as number,
-					remixPercentage: this.getNodeParameter('remixPercentage', 0) as number,
-					ownMediaPercentage: this.getNodeParameter('ownMediaPercentage', 0) as number,
-					mentionBusinessPercentage: this.getNodeParameter('mentionBusinessPercentage', 0) as number,
-				};
-				result = await client.updatePreferences(prefs);
-				break;
+					case 'getPreferences': {
+						result = await client.getPreferences();
+						break;
+					}
 
-			case 'getAngles':
-				result = await client.getAngles();
-				break;
+					case 'updatePreferences': {
+						const prefs = {
+							slideshowWeight: this.getNodeParameter('slideshowWeight', itemIndex) as number,
+							wallOfTextWeight: this.getNodeParameter('wallOfTextWeight', itemIndex) as number,
+							greenScreenWeight: this.getNodeParameter('greenScreenWeight', itemIndex) as number,
+							videoHookWeight: this.getNodeParameter('videoHookWeight', itemIndex) as number,
+							remixPercentage: this.getNodeParameter('remixPercentage', itemIndex) as number,
+							ownMediaPercentage: this.getNodeParameter('ownMediaPercentage', itemIndex) as number,
+							mentionBusinessPercentage: this.getNodeParameter('mentionBusinessPercentage', itemIndex) as number,
+						};
+						result = await client.updatePreferences(prefs);
+						break;
+					}
 
-			case 'createAngle':
-				const newAngle = {
-					title: this.getNodeParameter('title', 0) as string,
-					description: this.getNodeParameter('description', 0) as string,
-					targetAudience: this.getNodeParameter('targetAudience', 0) as string,
-				};
-				result = await client.createAngle(newAngle);
-				break;
+					case 'getAngles': {
+						result = await client.getAngles();
+						break;
+					}
 
-			case 'updateAngle':
-				const updateAngleId = this.getNodeParameter('angleId', 0) as string;
-				const angleData = {
-					title: this.getNodeParameter('title', 0) as string | undefined,
-					description: this.getNodeParameter('description', 0) as string | undefined,
-					targetAudience: this.getNodeParameter('targetAudience', 0) as string | undefined,
-					isActive: this.getNodeParameter('isActive', 0) as boolean | undefined,
-				};
-				result = await client.updateAngle(updateAngleId, angleData);
-				break;
+					case 'createAngle': {
+						const newAngle = {
+							title: this.getNodeParameter('title', itemIndex) as string,
+							description: this.getNodeParameter('description', itemIndex) as string,
+							targetAudience: this.getNodeParameter('targetAudience', itemIndex) as string,
+						};
+						result = await client.createAngle(newAngle);
+						break;
+					}
 
-			case 'deleteAngle':
-				const deleteAngleId = this.getNodeParameter('angleId', 0) as string;
-				result = await client.deleteAngle(deleteAngleId);
-				break;
+					case 'updateAngle': {
+						const angleId = this.getNodeParameter('angleId', itemIndex) as string;
+						const angleData = {
+							title: this.getNodeParameter('title', itemIndex) as string | undefined,
+							description: this.getNodeParameter('description', itemIndex) as string | undefined,
+							targetAudience: this.getNodeParameter('targetAudience', itemIndex) as string | undefined,
+							isActive: this.getNodeParameter('isActive', itemIndex) as boolean | undefined,
+						};
+						result = await client.updateAngle(angleId, angleData);
+						break;
+					}
 
-			case 'getConnections':
-				result = await client.getConnections();
-				break;
+					case 'deleteAngle': {
+						const angleId = this.getNodeParameter('angleId', itemIndex) as string;
+						result = await client.deleteAngle(angleId);
+						break;
+					}
 
-			case 'scheduleContent':
-				const scheduleContentId = this.getNodeParameter('contentId', 0) as string;
-				const scheduleData = {
-					platform: this.getNodeParameter('platform', 0) as any,
-					utc_datetime: this.getNodeParameter('utc_datetime', 0) as string,
-					caption: this.getNodeParameter('caption', 0) as string,
-					description: this.getNodeParameter('description', 0) as string,
-					connectionId: this.getNodeParameter('connectionId', 0) as string || undefined,
-				};
-				result = await client.scheduleContent(scheduleContentId, scheduleData);
-				break;
+					case 'getConnections': {
+						result = await client.getConnections();
+						break;
+					}
 
-			case 'getPosts':
-				const postsLimit = this.getNodeParameter('limit', 0) as number;
-				const postsStatus = this.getNodeParameter('status', 0) as string[];
-				result = await client.getPosts({
-					limit: postsLimit,
-					status: postsStatus.join(',') as any,
-				});
-				break;
+					case 'scheduleContent': {
+						const contentId = this.getNodeParameter('contentId', itemIndex) as string;
+						const platform = this.getNodeParameter('platform', itemIndex) as string;
+						const scheduleData = {
+							platform: platform as 'tiktok' | 'instagram' | 'youtube' | 'reddit',
+							utc_datetime: this.getNodeParameter('utc_datetime', itemIndex) as string,
+							caption: this.getNodeParameter('caption', itemIndex) as string,
+							description: this.getNodeParameter('description', itemIndex) as string,
+							connectionId: (this.getNodeParameter('connectionId', itemIndex) as string) || undefined,
+						};
+						result = await client.scheduleContent(contentId, scheduleData);
+						break;
+					}
 
-			case 'getPostById':
-				const postId = this.getNodeParameter('contentId', 0) as string;
-				result = await client.getPostById(postId);
-				break;
+					case 'getPosts': {
+						const limit = this.getNodeParameter('limit', itemIndex) as number;
+						const status = this.getNodeParameter('status', itemIndex) as string[];
+						result = await client.getPosts({
+							limit,
+							status: status.join(',') as 'BUILDING' | 'CREATED' | 'FAILED' | 'POSTED' | 'SCHEDULED',
+						});
+						break;
+					}
 
-			case 'cancelPosts':
-				const cancelPostIds = (this.getNodeParameter('postIds', 0) as string)
-					.split('\n')
-					.map((id) => id.trim())
-					.filter((id) => id);
-				result = await client.cancelPosts(cancelPostIds);
-				break;
+					case 'getPostById': {
+						const contentId = this.getNodeParameter('contentId', itemIndex) as string;
+						result = await client.getPostById(contentId);
+						break;
+					}
 
-			case 'getPostAnalytics':
-				const analyticsPostIds = (this.getNodeParameter('analyticsPostIds', 0) as string)
-					.split('\n')
-					.map((id) => id.trim())
-					.filter((id) => id);
-				result = await client.getPostAnalytics(analyticsPostIds);
-				break;
+					case 'cancelPosts': {
+						const postIds = (this.getNodeParameter('postIds', itemIndex) as string)
+							.split('\n')
+							.map((id) => id.trim())
+							.filter((id) => id);
+						result = await client.cancelPosts(postIds);
+						break;
+					}
 
-			default:
-				throw new Error(`Operation "${operation}" is not supported`);
+					case 'getPostAnalytics': {
+						const postIds = (this.getNodeParameter('analyticsPostIds', itemIndex) as string)
+							.split('\n')
+							.map((id) => id.trim())
+							.filter((id) => id);
+						result = await client.getPostAnalytics(postIds);
+						break;
+					}
+
+					default: {
+						throw new NodeOperationError(this.getNode(), `Operation "${operation}" is not supported`);
+					}
+				}
+
+				output.push({ json: result as IDataObject, pairedItem: { item: itemIndex } });
+			} catch (error) {
+				if (this.continueOnFail()) {
+					output.push({ json: { error: (error as Error).message }, pairedItem: { item: itemIndex } });
+				} else {
+					if (error instanceof NodeOperationError) {
+						throw error;
+					}
+					throw new NodeOperationError(this.getNode(), error as Error, { itemIndex });
+				}
+			}
 		}
 
-		const output: INodeExecutionData[] = [{ json: result as IDataObject }];
 		return [output];
 	}
 }

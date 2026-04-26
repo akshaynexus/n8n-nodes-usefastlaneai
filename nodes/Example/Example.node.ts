@@ -13,6 +13,7 @@ export class Example implements INodeType {
 		icon: { light: 'file:example.svg', dark: 'file:example.dark.svg' },
 		group: ['input'],
 		version: 1,
+		subtitle: '={{$parameter["myString"]}}',
 		description: 'Basic Example Node',
 		defaults: {
 			name: 'Example',
