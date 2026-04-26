@@ -4,16 +4,341 @@ import {
 	type IExecuteFunctions,
 	type IDataObject,
 	type INodeExecutionData,
+	type INodeProperties,
 	type INodeType,
 	type INodeTypeDescription,
 } from 'n8n-workflow';
-import { FastlaneClient } from 'usefastlane-api';
+import {
+	FastlaneClient,
+	type ContentType,
+	type ContentStatus,
+	type PostStatus,
+	type Platform,
+} from 'usefastlane-api';
+
+const OPERATIONS = [
+	['Cancel Posts', 'cancelPosts', 'Cancel scheduled posts', 'Cancel posts'],
+	['Create Angle', 'createAngle', 'Create a new content angle', 'Create angle'],
+	['Delete Angle', 'deleteAngle', 'Delete a content angle', 'Delete angle'],
+	['Delete Content', 'deleteContent', 'Delete a content item', 'Delete content'],
+	['Get Angles', 'getAngles', 'Get all content angles', 'Get angles'],
+	['Get Connections', 'getConnections', 'Get connected social accounts', 'Get connections'],
+	['Get Content', 'getContent', 'Get content items from the library', 'Get content items'],
+	['Get Content by ID', 'getContentById', 'Get a specific content item', 'Get content by ID'],
+	['Get Post Analytics', 'getPostAnalytics', 'Get engagement metrics for posts', 'Get post analytics'],
+	['Get Post by ID', 'getPostById', 'Get a specific post', 'Get post by ID'],
+	['Get Posts', 'getPosts', 'Get scheduled and posted posts', 'Get posts'],
+	['Get Preferences', 'getPreferences', 'Get discovery queue preferences', 'Get preferences'],
+	['Pop Blitz', 'popBlitz', 'Generate new content from the discovery queue', 'Pop a blitz from the discovery queue'],
+	['Schedule Content', 'scheduleContent', 'Schedule content for posting', 'Schedule content'],
+	['Update Angle', 'updateAngle', 'Update an existing content angle', 'Update angle'],
+	['Update Preferences', 'updatePreferences', 'Update discovery queue preferences', 'Update preferences'],
+] as const;
+
+type Operation = (typeof OPERATIONS)[number][1];
+
+type Handler = (
+	ctx: IExecuteFunctions,
+	client: FastlaneClient,
+	itemIndex: number,
+) => Promise<unknown>;
+
+const showFor = (...operations: Operation[]) => ({
+	show: {
+		operation: operations,
+	},
+});
+
+const percentOptions = {
+	minValue: 0,
+	maxValue: 100,
+};
+
+const p = <T>(ctx: IExecuteFunctions, name: string, itemIndex: number): T =>
+	ctx.getNodeParameter(name, itemIndex) as T;
+
+const optional = (value: string): string | undefined => {
+	const trimmed = value.trim();
+	return trimmed || undefined;
+};
+
+const csv = <T extends string>(values: T[]): T | undefined => {
+	const joined = values.filter(Boolean).join(',') as T;
+	return joined || undefined;
+};
+
+const lines = (value: string): string[] =>
+	value
+		.split('\n')
+		.map((id) => id.trim())
+		.filter(Boolean);
+
+const option = (name: string, value: string) => ({ name, value });
+
+const numberPercentField = (
+	displayName: string,
+	name: string,
+	defaultValue: number,
+	operations: Operation[],
+): INodeProperties => ({
+	displayName,
+	name,
+	type: 'number',
+	typeOptions: percentOptions,
+	default: defaultValue,
+	displayOptions: showFor(...operations),
+});
+
+const stringField = (
+	displayName: string,
+	name: string,
+	operations: Operation[],
+	extra: Partial<INodeProperties> = {},
+): INodeProperties => ({
+	displayName,
+	name,
+	type: 'string',
+	default: '',
+	displayOptions: showFor(...operations),
+	...extra,
+});
+
+const textAreaField = (
+	displayName: string,
+	name: string,
+	rows: number,
+	operations: Operation[],
+	extra: Partial<INodeProperties> = {},
+): INodeProperties =>
+	stringField(displayName, name, operations, {
+		typeOptions: { rows },
+		...extra,
+	});
+
+const operationField: INodeProperties = {
+	displayName: 'Operation',
+	name: 'operation',
+	type: 'options',
+	noDataExpression: true,
+	options: OPERATIONS.map(([name, value, description, action]) => ({
+		name,
+		value,
+		description,
+		action,
+	})),
+	default: 'popBlitz',
+};
+
+const commonFields: INodeProperties[] = [
+	stringField('Content ID', 'contentId', [
+		'getContentById',
+		'getPostById',
+		'deleteContent',
+		'scheduleContent',
+	], {
+		required: true,
+	}),
+
+	{
+		displayName: 'Limit',
+		name: 'limit',
+		type: 'number',
+		typeOptions: {
+			minValue: 1,
+			maxValue: 100,
+		},
+		default: 50,
+		description: 'Max number of results to return',
+		displayOptions: showFor('getContent', 'getPosts'),
+	},
+
+	{
+		displayName: 'Status',
+		name: 'status',
+		type: 'multiOptions',
+		default: [],
+		options: ['BUILDING', 'CREATED', 'FAILED', 'POSTED', 'SCHEDULED'].map((status) =>
+			option(status, status),
+		),
+		displayOptions: showFor('getContent', 'getPosts'),
+	},
+];
+
+const contentFields: INodeProperties[] = [
+	{
+		displayName: 'Content Type',
+		name: 'contentType',
+		type: 'options',
+		default: 'slideshow',
+		options: [
+			option('Green Screen', 'green-screen'),
+			option('Slideshow', 'slideshow'),
+			option('Video Hook', 'video-hook'),
+			option('Wall of Text', 'wall-of-text'),
+		],
+		displayOptions: showFor('getContent'),
+	},
+];
+
+const preferenceFields: INodeProperties[] = [
+	numberPercentField('Slideshow Weight', 'slideshowWeight', 25, ['updatePreferences']),
+	numberPercentField('Wall of Text Weight', 'wallOfTextWeight', 25, ['updatePreferences']),
+	numberPercentField('Green Screen Weight', 'greenScreenWeight', 25, ['updatePreferences']),
+	numberPercentField('Video Hook Weight', 'videoHookWeight', 25, ['updatePreferences']),
+	numberPercentField('Remix Percentage', 'remixPercentage', 50, ['updatePreferences']),
+	numberPercentField('Own Media Percentage', 'ownMediaPercentage', 50, ['updatePreferences']),
+	numberPercentField('Mention Business Percentage', 'mentionBusinessPercentage', 50, [
+		'updatePreferences',
+	]),
+];
+
+const angleFields: INodeProperties[] = [
+	stringField('Angle ID', 'angleId', ['updateAngle', 'deleteAngle']),
+	stringField('Title', 'title', ['createAngle', 'updateAngle']),
+	textAreaField('Description', 'description', 3, ['createAngle', 'updateAngle']),
+	stringField('Target Audience', 'targetAudience', ['createAngle', 'updateAngle']),
+	{
+		displayName: 'Active',
+		name: 'isActive',
+		type: 'boolean',
+		default: true,
+		displayOptions: showFor('updateAngle'),
+	},
+];
+
+const scheduleFields: INodeProperties[] = [
+	{
+		displayName: 'Platform',
+		name: 'platform',
+		type: 'options',
+		options: [
+			option('Instagram', 'instagram'),
+			option('Reddit', 'reddit'),
+			option('TikTok', 'tiktok'),
+			option('YouTube', 'youtube'),
+		],
+		default: 'tiktok',
+		displayOptions: showFor('scheduleContent'),
+	},
+	{
+		displayName: 'Schedule Date & Time',
+		name: 'utc_datetime',
+		type: 'dateTime',
+		default: '',
+		displayOptions: showFor('scheduleContent'),
+	},
+	textAreaField('Caption', 'caption', 2, ['scheduleContent']),
+	textAreaField('Description', 'description', 3, ['scheduleContent']),
+	stringField('Connection ID', 'connectionId', ['scheduleContent'], {
+		placeholder: 'Leave empty for auto-select',
+	}),
+];
+
+const postFields: INodeProperties[] = [
+	textAreaField('Post IDs', 'postIds', 4, ['cancelPosts'], {
+		placeholder: 'Enter post IDs, one per line',
+	}),
+	textAreaField('Post IDs', 'analyticsPostIds', 4, ['getPostAnalytics'], {
+		placeholder: 'Enter post IDs, one per line',
+	}),
+];
+
+const properties: INodeProperties[] = [
+	operationField,
+	...commonFields,
+	...contentFields,
+	...preferenceFields,
+	...angleFields,
+	...scheduleFields,
+	...postFields,
+];
+
+const handlers: Record<Operation, Handler> = {
+	popBlitz: async (_ctx, client) => client.popBlitz(),
+
+	getContent: async (ctx, client, itemIndex) => {
+		const status = p<ContentStatus[]>(ctx, 'status', itemIndex).filter(Boolean);
+		return client.getContent({
+			limit: p<number>(ctx, 'limit', itemIndex),
+			status: status.length > 0 ? csv(status) : undefined,
+			type: p<ContentType>(ctx, 'contentType', itemIndex),
+		});
+	},
+
+	getContentById: async (ctx, client, itemIndex) =>
+		client.getContentById(p<string>(ctx, 'contentId', itemIndex)),
+
+	deleteContent: async (ctx, client, itemIndex) =>
+		client.deleteContent(p<string>(ctx, 'contentId', itemIndex)),
+
+	getPreferences: async (_ctx, client) => client.getPreferences(),
+
+	updatePreferences: async (ctx, client, itemIndex) =>
+		client.updatePreferences({
+			slideshowWeight: p<number>(ctx, 'slideshowWeight', itemIndex),
+			wallOfTextWeight: p<number>(ctx, 'wallOfTextWeight', itemIndex),
+			greenScreenWeight: p<number>(ctx, 'greenScreenWeight', itemIndex),
+			videoHookWeight: p<number>(ctx, 'videoHookWeight', itemIndex),
+			remixPercentage: p<number>(ctx, 'remixPercentage', itemIndex),
+			ownMediaPercentage: p<number>(ctx, 'ownMediaPercentage', itemIndex),
+			mentionBusinessPercentage: p<number>(ctx, 'mentionBusinessPercentage', itemIndex),
+		}),
+
+	getAngles: async (_ctx, client) => client.getAngles(),
+
+	createAngle: async (ctx, client, itemIndex) =>
+		client.createAngle({
+			title: p<string>(ctx, 'title', itemIndex),
+			description: p<string>(ctx, 'description', itemIndex),
+			targetAudience: p<string>(ctx, 'targetAudience', itemIndex),
+		}),
+
+	updateAngle: async (ctx, client, itemIndex) =>
+		client.updateAngle(p<string>(ctx, 'angleId', itemIndex), {
+			title: p<string>(ctx, 'title', itemIndex),
+			description: p<string>(ctx, 'description', itemIndex),
+			targetAudience: p<string>(ctx, 'targetAudience', itemIndex),
+			isActive: p<boolean>(ctx, 'isActive', itemIndex),
+		}),
+
+	deleteAngle: async (ctx, client, itemIndex) =>
+		client.deleteAngle(p<string>(ctx, 'angleId', itemIndex)),
+
+	getConnections: async (_ctx, client) => client.getConnections(),
+
+	scheduleContent: async (ctx, client, itemIndex) =>
+		client.scheduleContent(p<string>(ctx, 'contentId', itemIndex), {
+			platform: p<Platform>(ctx, 'platform', itemIndex),
+			utc_datetime: p<string>(ctx, 'utc_datetime', itemIndex),
+			caption: p<string>(ctx, 'caption', itemIndex),
+			description: p<string>(ctx, 'description', itemIndex),
+			connectionId: optional(p<string>(ctx, 'connectionId', itemIndex)),
+		}),
+
+	getPosts: async (ctx, client, itemIndex) =>
+		client.getPosts({
+			limit: p<number>(ctx, 'limit', itemIndex),
+			status: csv(p<PostStatus[]>(ctx, 'status', itemIndex)),
+		}),
+
+	getPostById: async (ctx, client, itemIndex) =>
+		client.getPostById(p<string>(ctx, 'contentId', itemIndex)),
+
+	cancelPosts: async (ctx, client, itemIndex) =>
+		client.cancelPosts(lines(p<string>(ctx, 'postIds', itemIndex))),
+
+	getPostAnalytics: async (ctx, client, itemIndex) =>
+		client.getPostAnalytics(lines(p<string>(ctx, 'analyticsPostIds', itemIndex))),
+};
 
 export class FastlaneAI implements INodeType {
 	description: INodeTypeDescription = {
 		displayName: 'Fastlane AI',
 		name: 'fastlaneAi',
-		icon: { light: 'file:../../icons/fastlane.svg', dark: 'file:../../icons/fastlane.dark.svg' },
+		icon: {
+			light: 'file:../../icons/fastlane.svg',
+			dark: 'file:../../icons/fastlane.dark.svg',
+		},
 		group: ['input'],
 		version: 1,
 		subtitle: '={{$parameter["operation"]}}',
@@ -37,443 +362,7 @@ export class FastlaneAI implements INodeType {
 				'Content-Type': 'application/json',
 			},
 		},
-		properties: [
-			{
-				displayName: 'Operation',
-				name: 'operation',
-				type: 'options',
-				noDataExpression: true,
-				options: [
-					{
-						name: 'Cancel Posts',
-						value: 'cancelPosts',
-						description: 'Cancel scheduled posts',
-						action: 'Cancel posts',
-					},
-					{
-						name: 'Create Angle',
-						value: 'createAngle',
-						description: 'Create a new content angle',
-						action: 'Create angle',
-					},
-					{
-						name: 'Delete Angle',
-						value: 'deleteAngle',
-						description: 'Delete a content angle',
-						action: 'Delete angle',
-					},
-					{
-						name: 'Delete Content',
-						value: 'deleteContent',
-						description: 'Delete a content item',
-						action: 'Delete content',
-					},
-					{
-						name: 'Get Angles',
-						value: 'getAngles',
-						description: 'Get all content angles',
-						action: 'Get angles',
-					},
-					{
-						name: 'Get Connections',
-						value: 'getConnections',
-						description: 'Get connected social accounts',
-						action: 'Get connections',
-					},
-					{
-						name: 'Get Content',
-						value: 'getContent',
-						description: 'Get content items from the library',
-						action: 'Get content items',
-					},
-					{
-						name: 'Get Content by ID',
-						value: 'getContentById',
-						description: 'Get a specific content item',
-						action: 'Get content by ID',
-					},
-					{
-						name: 'Get Post Analytics',
-						value: 'getPostAnalytics',
-						description: 'Get engagement metrics for posts',
-						action: 'Get post analytics',
-					},
-					{
-						name: 'Get Post by ID',
-						value: 'getPostById',
-						description: 'Get a specific post',
-						action: 'Get post by ID',
-					},
-					{
-						name: 'Get Posts',
-						value: 'getPosts',
-						description: 'Get scheduled and posted posts',
-						action: 'Get posts',
-					},
-					{
-						name: 'Get Preferences',
-						value: 'getPreferences',
-						description: 'Get discovery queue preferences',
-						action: 'Get preferences',
-					},
-					{
-						name: 'Pop Blitz',
-						value: 'popBlitz',
-						description: 'Generate new content from the discovery queue',
-						action: 'Pop a blitz from the discovery queue',
-					},
-					{
-						name: 'Schedule Content',
-						value: 'scheduleContent',
-						description: 'Schedule content for posting',
-						action: 'Schedule content',
-					},
-					{
-						name: 'Update Angle',
-						value: 'updateAngle',
-						description: 'Update an existing content angle',
-						action: 'Update angle',
-					},
-					{
-						name: 'Update Preferences',
-						value: 'updatePreferences',
-						description: 'Update discovery queue preferences',
-						action: 'Update preferences',
-					},
-				],
-				default: 'popBlitz',
-			},
-			// Content Parameters
-			{
-				displayName: 'Content ID',
-				name: 'contentId',
-				type: 'string',
-				default: '',
-				required: true,
-				displayOptions: {
-					show: {
-						operation: ['getContentById', 'deleteContent', 'scheduleContent'],
-					},
-				},
-			},
-			{
-				displayName: 'Limit',
-				name: 'limit',
-				type: 'number',
-				typeOptions: {
-					minValue: 1,
-					maxValue: 100,
-				},
-				default: 50,
-				description: 'Max number of results to return',
-				displayOptions: {
-					show: {
-						operation: ['getContent', 'getPosts'],
-					},
-				},
-			},
-			{
-				displayName: 'Status',
-				name: 'status',
-				type: 'multiOptions',
-				default: [],
-				options: [
-					{ name: 'BUILDING', value: 'BUILDING' },
-					{ name: 'CREATED', value: 'CREATED' },
-					{ name: 'FAILED', value: 'FAILED' },
-					{ name: 'POSTED', value: 'POSTED' },
-					{ name: 'SCHEDULED', value: 'SCHEDULED' },
-				],
-				displayOptions: {
-					show: {
-						operation: ['getContent', 'getPosts'],
-					},
-				},
-			},
-			{
-				displayName: 'Content Type',
-				name: 'contentType',
-				type: 'options',
-				default: 'slideshow',
-				options: [
-					{ name: 'Green Screen', value: 'green-screen' },
-					{ name: 'Slideshow', value: 'slideshow' },
-					{ name: 'Video Hook', value: 'video-hook' },
-					{ name: 'Wall of Text', value: 'wall-of-text' },
-				],
-				displayOptions: {
-					show: {
-						operation: ['getContent'],
-					},
-				},
-			},
-			// Preferences Parameters
-			{
-				displayName: 'Slideshow Weight',
-				name: 'slideshowWeight',
-				type: 'number',
-				typeOptions: {
-					minValue: 0,
-					maxValue: 100,
-				},
-				default: 25,
-				displayOptions: {
-					show: {
-						operation: ['updatePreferences'],
-					},
-				},
-			},
-			{
-				displayName: 'Wall of Text Weight',
-				name: 'wallOfTextWeight',
-				type: 'number',
-				typeOptions: {
-					minValue: 0,
-					maxValue: 100,
-				},
-				default: 25,
-				displayOptions: {
-					show: {
-						operation: ['updatePreferences'],
-					},
-				},
-			},
-			{
-				displayName: 'Green Screen Weight',
-				name: 'greenScreenWeight',
-				type: 'number',
-				typeOptions: {
-					minValue: 0,
-					maxValue: 100,
-				},
-				default: 25,
-				displayOptions: {
-					show: {
-						operation: ['updatePreferences'],
-					},
-				},
-			},
-			{
-				displayName: 'Video Hook Weight',
-				name: 'videoHookWeight',
-				type: 'number',
-				typeOptions: {
-					minValue: 0,
-					maxValue: 100,
-				},
-				default: 25,
-				displayOptions: {
-					show: {
-						operation: ['updatePreferences'],
-					},
-				},
-			},
-			{
-				displayName: 'Remix Percentage',
-				name: 'remixPercentage',
-				type: 'number',
-				typeOptions: {
-					minValue: 0,
-					maxValue: 100,
-				},
-				default: 50,
-				displayOptions: {
-					show: {
-						operation: ['updatePreferences'],
-					},
-				},
-			},
-			{
-				displayName: 'Own Media Percentage',
-				name: 'ownMediaPercentage',
-				type: 'number',
-				typeOptions: {
-					minValue: 0,
-					maxValue: 100,
-				},
-				default: 50,
-				displayOptions: {
-					show: {
-						operation: ['updatePreferences'],
-					},
-				},
-			},
-			{
-				displayName: 'Mention Business Percentage',
-				name: 'mentionBusinessPercentage',
-				type: 'number',
-				typeOptions: {
-					minValue: 0,
-					maxValue: 100,
-				},
-				default: 50,
-				displayOptions: {
-					show: {
-						operation: ['updatePreferences'],
-					},
-				},
-			},
-			// Angle Parameters
-			{
-				displayName: 'Angle ID',
-				name: 'angleId',
-				type: 'string',
-				default: '',
-				displayOptions: {
-					show: {
-						operation: ['updateAngle', 'deleteAngle'],
-					},
-				},
-			},
-			{
-				displayName: 'Title',
-				name: 'title',
-				type: 'string',
-				default: '',
-				displayOptions: {
-					show: {
-						operation: ['createAngle', 'updateAngle'],
-					},
-				},
-			},
-			{
-				displayName: 'Description',
-				name: 'description',
-				type: 'string',
-				typeOptions: {
-					rows: 3,
-				},
-				default: '',
-				displayOptions: {
-					show: {
-						operation: ['createAngle', 'updateAngle'],
-					},
-				},
-			},
-			{
-				displayName: 'Target Audience',
-				name: 'targetAudience',
-				type: 'string',
-				default: '',
-				displayOptions: {
-					show: {
-						operation: ['createAngle', 'updateAngle'],
-					},
-				},
-			},
-			{
-				displayName: 'Active',
-				name: 'isActive',
-				type: 'boolean',
-				default: true,
-				displayOptions: {
-					show: {
-						operation: ['updateAngle'],
-					},
-				},
-			},
-			// Schedule Parameters
-			{
-				displayName: 'Platform',
-				name: 'platform',
-				type: 'options',
-				options: [
-					{ name: 'Instagram', value: 'instagram' },
-					{ name: 'Reddit', value: 'reddit' },
-					{ name: 'TikTok', value: 'tiktok' },
-					{ name: 'YouTube', value: 'youtube' },
-				],
-				default: 'tiktok',
-				displayOptions: {
-					show: {
-						operation: ['scheduleContent'],
-					},
-				},
-			},
-			{
-				displayName: 'Schedule Date & Time',
-				name: 'utc_datetime',
-				type: 'dateTime',
-				default: '',
-				displayOptions: {
-					show: {
-						operation: ['scheduleContent'],
-					},
-				},
-			},
-			{
-				displayName: 'Caption',
-				name: 'caption',
-				type: 'string',
-				typeOptions: {
-					rows: 2,
-				},
-				default: '',
-				displayOptions: {
-					show: {
-						operation: ['scheduleContent'],
-					},
-				},
-			},
-			{
-				displayName: 'Description',
-				name: 'description',
-				type: 'string',
-				typeOptions: {
-					rows: 3,
-				},
-				default: '',
-				displayOptions: {
-					show: {
-						operation: ['scheduleContent'],
-					},
-				},
-			},
-			{
-				displayName: 'Connection ID',
-				name: 'connectionId',
-				type: 'string',
-				default: '',
-				placeholder: 'Leave empty for auto-select',
-				displayOptions: {
-					show: {
-						operation: ['scheduleContent'],
-					},
-				},
-			},
-			// Cancel Posts Parameters
-			{
-				displayName: 'Post IDs',
-				name: 'postIds',
-				type: 'string',
-				typeOptions: {
-					rows: 4,
-				},
-				default: '',
-				placeholder: 'Enter post IDs, one per line',
-				displayOptions: {
-					show: {
-						operation: ['cancelPosts'],
-					},
-				},
-			},
-			// Analytics Parameters
-			{
-				displayName: 'Post IDs',
-				name: 'analyticsPostIds',
-				type: 'string',
-				typeOptions: {
-					rows: 4,
-				},
-				default: '',
-				placeholder: 'Enter post IDs, one per line',
-				displayOptions: {
-					show: {
-						operation: ['getPostAnalytics'],
-					},
-				},
-			},
-		],
+		properties,
 	};
 
 	async execute(this: IExecuteFunctions): Promise<INodeExecutionData[][]> {
@@ -485,160 +374,37 @@ export class FastlaneAI implements INodeType {
 
 		for (let itemIndex = 0; itemIndex < items.length; itemIndex++) {
 			try {
-				const operation = this.getNodeParameter('operation', itemIndex) as string;
-				let result: unknown;
+				const operation = p<Operation>(this, 'operation', itemIndex);
+				const handler = handlers[operation];
 
-				switch (operation) {
-					case 'popBlitz': {
-						result = await client.popBlitz();
-						break;
-					}
-
-					case 'getContent': {
-						const contentLimit = this.getNodeParameter('limit', itemIndex) as number;
-						const contentStatus = this.getNodeParameter('status', itemIndex) as string[];
-						const contentType = this.getNodeParameter('contentType', itemIndex) as string;
-						const joinedStatus = contentStatus.join(',');
-						result = await client.getContent({
-							limit: contentLimit,
-							status: joinedStatus ? (joinedStatus as 'BUILDING' | 'CREATED' | 'FAILED') : undefined,
-							type: contentType as 'slideshow' | 'wall-of-text' | 'green-screen' | 'video-hook' | undefined,
-						});
-						break;
-					}
-
-					case 'getContentById': {
-						const contentId = this.getNodeParameter('contentId', itemIndex) as string;
-						result = await client.getContentById(contentId);
-						break;
-					}
-
-					case 'deleteContent': {
-						const contentId = this.getNodeParameter('contentId', itemIndex) as string;
-						result = await client.deleteContent(contentId);
-						break;
-					}
-
-					case 'getPreferences': {
-						result = await client.getPreferences();
-						break;
-					}
-
-					case 'updatePreferences': {
-						const prefs = {
-							slideshowWeight: this.getNodeParameter('slideshowWeight', itemIndex) as number,
-							wallOfTextWeight: this.getNodeParameter('wallOfTextWeight', itemIndex) as number,
-							greenScreenWeight: this.getNodeParameter('greenScreenWeight', itemIndex) as number,
-							videoHookWeight: this.getNodeParameter('videoHookWeight', itemIndex) as number,
-							remixPercentage: this.getNodeParameter('remixPercentage', itemIndex) as number,
-							ownMediaPercentage: this.getNodeParameter('ownMediaPercentage', itemIndex) as number,
-							mentionBusinessPercentage: this.getNodeParameter('mentionBusinessPercentage', itemIndex) as number,
-						};
-						result = await client.updatePreferences(prefs);
-						break;
-					}
-
-					case 'getAngles': {
-						result = await client.getAngles();
-						break;
-					}
-
-					case 'createAngle': {
-						const newAngle = {
-							title: this.getNodeParameter('title', itemIndex) as string,
-							description: this.getNodeParameter('description', itemIndex) as string,
-							targetAudience: this.getNodeParameter('targetAudience', itemIndex) as string,
-						};
-						result = await client.createAngle(newAngle);
-						break;
-					}
-
-					case 'updateAngle': {
-						const angleId = this.getNodeParameter('angleId', itemIndex) as string;
-						const angleData = {
-							title: this.getNodeParameter('title', itemIndex) as string | undefined,
-							description: this.getNodeParameter('description', itemIndex) as string | undefined,
-							targetAudience: this.getNodeParameter('targetAudience', itemIndex) as string | undefined,
-							isActive: this.getNodeParameter('isActive', itemIndex) as boolean | undefined,
-						};
-						result = await client.updateAngle(angleId, angleData);
-						break;
-					}
-
-					case 'deleteAngle': {
-						const angleId = this.getNodeParameter('angleId', itemIndex) as string;
-						result = await client.deleteAngle(angleId);
-						break;
-					}
-
-					case 'getConnections': {
-						result = await client.getConnections();
-						break;
-					}
-
-					case 'scheduleContent': {
-						const contentId = this.getNodeParameter('contentId', itemIndex) as string;
-						const platform = this.getNodeParameter('platform', itemIndex) as string;
-						const scheduleData = {
-							platform: platform as 'tiktok' | 'instagram' | 'youtube' | 'reddit',
-							utc_datetime: this.getNodeParameter('utc_datetime', itemIndex) as string,
-							caption: this.getNodeParameter('caption', itemIndex) as string,
-							description: this.getNodeParameter('description', itemIndex) as string,
-							connectionId: (this.getNodeParameter('connectionId', itemIndex) as string) || undefined,
-						};
-						result = await client.scheduleContent(contentId, scheduleData);
-						break;
-					}
-
-					case 'getPosts': {
-						const limit = this.getNodeParameter('limit', itemIndex) as number;
-						const status = this.getNodeParameter('status', itemIndex) as string[];
-						result = await client.getPosts({
-							limit,
-							status: status.join(',') as 'BUILDING' | 'CREATED' | 'FAILED' | 'POSTED' | 'SCHEDULED',
-						});
-						break;
-					}
-
-					case 'getPostById': {
-						const contentId = this.getNodeParameter('contentId', itemIndex) as string;
-						result = await client.getPostById(contentId);
-						break;
-					}
-
-					case 'cancelPosts': {
-						const postIds = (this.getNodeParameter('postIds', itemIndex) as string)
-							.split('\n')
-							.map((id) => id.trim())
-							.filter((id) => id);
-						result = await client.cancelPosts(postIds);
-						break;
-					}
-
-					case 'getPostAnalytics': {
-						const postIds = (this.getNodeParameter('analyticsPostIds', itemIndex) as string)
-							.split('\n')
-							.map((id) => id.trim())
-							.filter((id) => id);
-						result = await client.getPostAnalytics(postIds);
-						break;
-					}
-
-					default: {
-						throw new NodeOperationError(this.getNode(), `Operation "${operation}" is not supported`);
-					}
+				if (!handler) {
+					throw new NodeOperationError(this.getNode(), `Operation "${operation}" is not supported`, {
+						itemIndex,
+					});
 				}
 
-				output.push({ json: result as IDataObject, pairedItem: { item: itemIndex } });
+				const result = await handler(this, client, itemIndex);
+
+				output.push({
+					json: result as IDataObject,
+					pairedItem: { item: itemIndex },
+				});
 			} catch (error) {
 				if (this.continueOnFail()) {
-					output.push({ json: { error: (error as Error).message }, pairedItem: { item: itemIndex } });
-				} else {
-					if (error instanceof NodeOperationError) {
-						throw error;
-					}
-					throw new NodeOperationError(this.getNode(), error as Error, { itemIndex });
+					output.push({
+						json: {
+							error: error instanceof Error ? error.message : String(error),
+						},
+						pairedItem: { item: itemIndex },
+					});
+					continue;
 				}
+
+				if (error instanceof NodeOperationError) {
+					throw error;
+				}
+
+				throw new NodeOperationError(this.getNode(), error as Error, { itemIndex });
 			}
 		}
 
